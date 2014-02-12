@@ -57,7 +57,7 @@ typedef struct dbase_policydb dbase_t;
 
 #include "debug.h"
 
-const char *DISABLESTR=".disabled";
+static const char *DISABLESTR="disabled";
 
 #define SEMANAGE_CONF_FILE "semanage.conf"
 /* relative path names to enum semanage_paths to special files and
@@ -90,7 +90,7 @@ static const char *semanage_store_paths[SEMANAGE_NUM_STORES] = {
 	"/tmp"
 };
 
-/* this is the module store path relative to selinux_policy_root() */
+/* this is the module store path relative to semanage_policy_root() */
 #define SEMANAGE_MOD_DIR "/modules"
 /* relative path names to enum sandbox_paths for special files within
  * a sandbox */
@@ -117,6 +117,7 @@ static const char *semanage_sandbox_paths[SEMANAGE_STORE_NUM_PATHS] = {
 	"/netfilter_contexts",
 	"/file_contexts.homedirs",
 	"/disable_dontaudit",
+	"/preserve_tunables",
 };
 
 /* A node used in a linked list of file contexts; used for sorting.
@@ -170,11 +171,11 @@ static int semanage_init_paths(const char *root)
 			semanage_relative_files[i]);
 	}
 
-	len = strlen(selinux_path()) + strlen(SEMANAGE_CONF_FILE);
+	len = strlen(semanage_selinux_path()) + strlen(SEMANAGE_CONF_FILE);
 	semanage_conf = calloc(len + 1, sizeof(char));
 	if (!semanage_conf)
 		return -1;
-	snprintf(semanage_conf, len, "%s%s", selinux_path(),
+	snprintf(semanage_conf, len, "%s%s", semanage_selinux_path(),
 		 SEMANAGE_CONF_FILE);
 
 	return 0;
@@ -380,7 +381,7 @@ int semanage_create_store(semanage_handle_t * sh, int create)
  * SEMANAGE_CAN_READ if the store can be read and the lock file used
  * SEMANAGE_CAN_WRITE if the modules directory and binary policy dir can be written to
  */
-int semanage_store_access_check(semanage_handle_t * sh)
+int semanage_store_access_check(void)
 {
 	const char *path;
 	int rc = -1;
@@ -425,6 +426,13 @@ int semanage_store_access_check(semanage_handle_t * sh)
 
 /********************* other I/O functions *********************/
 
+static int is_disabled_file(const char *file) {
+	char *ptr = strrchr(file, '.');
+	if (! ptr) return 0;
+	ptr++;
+	return (strcmp(ptr, DISABLESTR) == 0);
+}
+
 /* Callback used by scandir() to select files. */
 static int semanage_filename_select(const struct dirent *d)
 {
@@ -435,11 +443,41 @@ static int semanage_filename_select(const struct dirent *d)
 	return 1;
 }
 
-int semanage_module_enabled(const char *file) {
-	int len = strlen(file) - strlen(DISABLESTR);
-	return (len < 0 || strcmp(&file[len], DISABLESTR) != 0);
+int semanage_disable_module(const char *file) {
+	char path[PATH_MAX];
+	int in;
+	int n = snprintf(path, PATH_MAX, "%s.%s", file, DISABLESTR);
+	if (n < 0 || n >= PATH_MAX)
+		return -1;
+	if ((in = open(path, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR)) == -1) {
+		return -1;
+	}
+	close(in);
+	return 0;
 }
 
+int semanage_enable_module(const char *file) {
+	char path[PATH_MAX];
+	int n = snprintf(path, PATH_MAX, "%s.%s", file, DISABLESTR);
+	if (n < 0 || n >= PATH_MAX)
+		return 1;
+
+	if ((unlink(path) < 0) && (errno != ENOENT))
+		return -1;
+	return 0;
+}
+
+int semanage_module_enabled(const char *file) {
+	char path[PATH_MAX];
+	if (is_disabled_file(file)) return 0;
+	int n = snprintf(path, PATH_MAX, "%s.%s", file, DISABLESTR);
+	if (n < 0 || n >= PATH_MAX)
+		return 1;
+
+	return (access(path, F_OK ) != 0);
+}
+
+/* Callback used by scandir() to select module files. */
 static int semanage_modulename_select(const struct dirent *d)
 {
 	if (d->d_name[0] == '.'
@@ -447,7 +485,7 @@ static int semanage_modulename_select(const struct dirent *d)
 		|| (d->d_name[1] == '.' && d->d_name[2] == '\0')))
 		return 0;
 
-	return semanage_module_enabled(d->d_name);
+	return (! is_disabled_file(d->d_name));
 }
 
 /* Copies a file from src to dst.  If dst already exists then
@@ -457,6 +495,7 @@ static int semanage_copy_file(const char *src, const char *dst, mode_t mode)
 	int in, out, retval = 0, amount_read, n, errsv = errno;
 	char tmp[PATH_MAX];
 	char buf[4192];
+	mode_t mask;
 
 	n = snprintf(tmp, PATH_MAX, "%s.tmp", dst);
 	if (n < 0 || n >= PATH_MAX)
@@ -468,13 +507,16 @@ static int semanage_copy_file(const char *src, const char *dst, mode_t mode)
 
 	if (!mode)
 		mode = S_IRUSR | S_IWUSR;
-
+	
+	mask = umask(0);
 	if ((out = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, mode)) == -1) {
+		umask(mask);
 		errsv = errno;
 		close(in);
 		retval = -1;
 		goto out;
 	}
+	umask(mask);
 	while (retval == 0 && (amount_read = read(in, buf, sizeof(buf))) > 0) {
 		if (write(out, buf, amount_read) < 0) {
 			errsv = errno;
@@ -684,7 +726,7 @@ int semanage_get_modules_names(semanage_handle_t * sh, char ***filenames,
 			       int *len)
 {
 	return semanage_get_modules_names_filter(sh, filenames,
-						 len, semanage_filename_select);
+						 len, semanage_modulename_select);
 }
 
 /* Scans the modules directory for the current semanage handler.  This
@@ -697,8 +739,25 @@ int semanage_get_modules_names(semanage_handle_t * sh, char ***filenames,
 int semanage_get_active_modules_names(semanage_handle_t * sh, char ***filenames,
 			       int *len)
 {
-	return semanage_get_modules_names_filter(sh, filenames,
-						 len, semanage_modulename_select);
+
+	int rc = semanage_get_modules_names_filter(sh, filenames,
+						   len, semanage_modulename_select);
+	if ( rc != 0 ) return rc;
+
+	int i = 0, num_modules = *len;
+	char **names=*filenames;
+
+	while ( i < num_modules ) {
+		if (! semanage_module_enabled(names[i])) {
+			free(names[i]);
+			names[i]=names[num_modules-1];
+			names[num_modules-1] = NULL;
+			num_modules--;
+		}
+		i++;
+	}
+	*len = num_modules;
+	return 0;
 }
 
 /******************* routines that run external programs *******************/
@@ -1071,14 +1130,14 @@ static int semanage_install_active(semanage_handle_t * sh)
 	const char *active_fc_hd =
 	    semanage_path(SEMANAGE_ACTIVE, SEMANAGE_FC_HOMEDIRS);
 
-	const char *running_fc = selinux_file_context_path();
-	const char *running_fc_loc = selinux_file_context_local_path();
-	const char *running_fc_hd = selinux_file_context_homedir_path();
-	const char *running_hd = selinux_homedir_context_path();
-	const char *running_policy = selinux_binary_policy_path();
-	const char *running_seusers = selinux_usersconf_path();
-	const char *running_nc = selinux_netfilter_context_path();
-	const char *really_active_store = selinux_policy_root();
+	const char *running_fc = semanage_file_context_path();
+	const char *running_fc_loc = semanage_file_context_local_path();
+	const char *running_fc_hd = semanage_file_context_homedir_path();
+	const char *running_hd = semanage_homedir_context_path();
+	const char *running_policy = semanage_binary_policy_path();
+	const char *running_seusers = semanage_usersconf_path();
+	const char *running_nc = semanage_netfilter_context_path();
+	const char *really_active_store = semanage_policy_root();
 
 	/* This is very unelegant, the right thing to do is export the path 
 	 * building code in libselinux so that you can get paths for a given 
@@ -1099,11 +1158,11 @@ static int semanage_install_active(semanage_handle_t * sh)
 	running_seusers += len;
 	running_nc += len;
 
-	len = strlen(selinux_path()) + strlen(sh->conf->store_path) + 1;
+	len = strlen(semanage_selinux_path()) + strlen(sh->conf->store_path) + 1;
 	storepath = (char *)malloc(len);
 	if (!storepath)
 		goto cleanup;
-	snprintf(storepath, PATH_MAX, "%s%s", selinux_path(),
+	snprintf(storepath, PATH_MAX, "%s%s", semanage_selinux_path(),
 		 sh->conf->store_path);
 
 	snprintf(store_pol, PATH_MAX, "%s%s.%d", storepath,
@@ -2296,7 +2355,7 @@ int semanage_fc_sort(semanage_handle_t * sh, const char *buf, size_t buf_len,
 		}
 		if (i == line_len) {
 			ERR(sh,
-			    "WARNING: semanage_fc_sort: Incomplete context.");
+			    "WARNING: semanage_fc_sort: Incomplete context. %s", temp->path);
 			semanage_fc_node_destroy(temp);
 			line_buf = line_end + 1;
 			continue;
@@ -2308,7 +2367,7 @@ int semanage_fc_sort(semanage_handle_t * sh, const char *buf, size_t buf_len,
 
 			if (i + type_len >= line_len) {
 				ERR(sh,
-				    "WARNING: semanage_fc_sort: Incomplete context.");
+				    "WARNING: semanage_fc_sort: Incomplete context. %s", temp->path);
 				semanage_fc_node_destroy(temp);
 				line_buf = line_end + 1;
 				continue;
@@ -2333,7 +2392,7 @@ int semanage_fc_sort(semanage_handle_t * sh, const char *buf, size_t buf_len,
 			}
 			if (i == line_len) {
 				ERR(sh,
-				    "WARNING: semanage_fc_sort: Incomplete context.");
+				    "WARNING: semanage_fc_sort: Incomplete context. %s", temp->path);
 				semanage_fc_node_destroy(temp);
 				line_buf = line_end + 1;
 				continue;
