@@ -2,7 +2,7 @@
  *         Christopher Ashworth <cashworth@tresys.com>
  *
  * Copyright (C) 2004-2006 Tresys Technology, LLC
- * Copyright (C) 2005 Red Hat, Inc.
+ * Copyright (C) 2005-2011 Red Hat, Inc.
  * 
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -95,7 +95,7 @@ int semanage_direct_is_managed(semanage_handle_t * sh)
 {
 	char polpath[PATH_MAX];
 
-	snprintf(polpath, PATH_MAX, "%s%s", selinux_path(),
+	snprintf(polpath, PATH_MAX, "%s%s", semanage_selinux_path(),
 		 sh->conf->store_path);
 
 	if (semanage_check_init(polpath))
@@ -118,7 +118,7 @@ int semanage_direct_connect(semanage_handle_t * sh)
 	char polpath[PATH_MAX];
 	const char *path;
 
-	snprintf(polpath, PATH_MAX, "%s%s", selinux_path(),
+	snprintf(polpath, PATH_MAX, "%s%s", semanage_selinux_path(),
 		 sh->conf->store_path);
 
 	if (semanage_check_init(polpath))
@@ -243,7 +243,8 @@ int semanage_direct_connect(semanage_handle_t * sh)
 	return STATUS_ERR;
 }
 
-static void semanage_direct_destroy(semanage_handle_t * sh)
+static void semanage_direct_destroy(semanage_handle_t * sh
+					__attribute__ ((unused)))
 {
 	/* do nothing */
 	sh = NULL;
@@ -352,15 +353,9 @@ static int parse_module_headers(semanage_handle_t * sh, char *module_data,
 	     semanage_path(SEMANAGE_TMP, SEMANAGE_MODULES)) == NULL) {
 		return -1;
 	}
-	if (asprintf(filename, "%s/%s.pp%s", module_path, *module_name, DISABLESTR) == -1) {
+	if (asprintf(filename, "%s/%s.pp", module_path, *module_name) == -1) {
 		ERR(sh, "Out of memory!");
 		return -1;
-	}
-
-	if (access(*filename, F_OK) == -1) {
-		char *ptr = *filename;
-		int len = strlen(ptr) - strlen(DISABLESTR);
-		if (len > 0) ptr[len]='\0';
 	}
 
 	return 0;
@@ -694,7 +689,8 @@ static int semanage_direct_commit(semanage_handle_t * sh)
 
 	/* Declare some variables */
 	int modified = 0, fcontexts_modified, ports_modified,
-	    seusers_modified, users_extra_modified, dontaudit_modified;
+	    seusers_modified, users_extra_modified, dontaudit_modified,
+	    preserve_tunables_modified;
 	dbase_config_t *users = semanage_user_dbase_local(sh);
 	dbase_config_t *users_base = semanage_user_base_dbase_local(sh);
 	dbase_config_t *pusers_base = semanage_user_base_dbase_policy(sh);
@@ -736,6 +732,31 @@ static int semanage_direct_commit(semanage_handle_t * sh)
 		}
 	}
 
+	/* Create or remove the preserve_tunables flag file. */
+	path = semanage_path(SEMANAGE_TMP, SEMANAGE_PRESERVE_TUNABLES);
+	if (access(path, F_OK) == 0)
+		preserve_tunables_modified = !(sepol_get_preserve_tunables(sh->sepolh) == 1);
+	else
+		preserve_tunables_modified = (sepol_get_preserve_tunables(sh->sepolh) == 1);
+	if (sepol_get_preserve_tunables(sh->sepolh) == 1) {
+		FILE *touch;
+		touch = fopen(path, "w");
+		if (touch != NULL) {
+			if (fclose(touch) != 0) {
+				ERR(sh, "Error attempting to create preserve_tunable flag.");
+				goto cleanup;
+			}
+		} else {
+			ERR(sh, "Error attempting to create preserve_tunable flag.");
+			goto cleanup;
+		}
+	} else {
+		if (remove(path) == -1 && errno != ENOENT) {
+			ERR(sh, "Error removing the preserve_tunables flag.");
+			goto cleanup;
+		}
+	}
+
 	/* Before we do anything else, flush the join to its component parts.
 	 * This *does not* flush to disk automatically */
 	if (users->dtable->is_modified(users->dbase)) {
@@ -758,6 +779,7 @@ static int semanage_direct_commit(semanage_handle_t * sh)
 	modified |= ifaces->dtable->is_modified(ifaces->dbase);
 	modified |= nodes->dtable->is_modified(nodes->dbase);
 	modified |= dontaudit_modified;
+	modified |= preserve_tunables_modified;
 
 	/* If there were policy changes, or explicitly requested, rebuild the policy */
 	if (sh->do_rebuild || modified) {
@@ -970,7 +992,7 @@ static int semanage_direct_commit(semanage_handle_t * sh)
 	 * which requires the out policydb */
 	if (!sh->conf->disable_genhomedircon) {
 		if (out && (retval =
-		     semanage_genhomedircon(sh, out, sh->conf->usepasswd)) != 0) {
+			semanage_genhomedircon(sh, out, sh->conf->usepasswd, sh->conf->ignoredirs)) != 0) {
 			ERR(sh, "semanage_genhomedircon returned error code %d.",
 			    retval);
 			goto cleanup;
@@ -1306,29 +1328,12 @@ static int semanage_direct_enable(semanage_handle_t * sh, char *module_name)
 		base++;
 		if (memcmp(module_name, base, name_len) == 0) {
 
-			if(strcmp(base + name_len + 3, DISABLESTR) != 0) {
-				ERR(sh, "Module %s is already enabled.", module_name);
+			if (semanage_enable_module(module_filenames[i]) < 0) {
+				ERR(sh, "Could not enable module %s.", module_name);
 				retval = -2;
 				goto cleanup;
-			}
-
-			int len = strlen(module_filenames[i]) - strlen(DISABLESTR);
-			char *enabled_name = calloc(1, len+1);
-			if (!enabled_name) {
-				ERR(sh, "Could not allocate memory");
-				retval = -1;
-				goto cleanup;
-			}
-
-			strncpy(enabled_name, module_filenames[i],len);
-
-			if (rename(module_filenames[i], enabled_name) == -1) {
-				ERR(sh, "Could not enable module file %s.",
-				    enabled_name);
-				retval = -2;
 			}
 			retval = 0;
-			free(enabled_name);
 			goto cleanup;
 		}
 	}
@@ -1362,28 +1367,14 @@ static int semanage_direct_disable(semanage_handle_t * sh, char *module_name)
 			goto cleanup;
 		}
 		base++;
-		if (memcmp(module_name, base, name_len) == 0) {
-			if (strcmp(base + name_len + 3, DISABLESTR) == 0) {
-				ERR(sh, "Module %s is already disabled.", module_name);
+		if ((memcmp(module_name, base, name_len) == 0) &&
+		    (strcmp(base + name_len, ".pp") == 0)) {
+			if (semanage_disable_module(module_filenames[i]) < 0) {
 				retval = -2;
 				goto cleanup;
-			} else if (strcmp(base + name_len, ".pp") == 0) {
-				char disabled_name[PATH_MAX];
-				if (snprintf(disabled_name, PATH_MAX, "%s%s", 
-							module_filenames[i], DISABLESTR) == PATH_MAX) {
-					ERR(sh, "Could not disable module file %s.",
-							module_filenames[i]);
-					retval = -2;
-					goto cleanup;
-				}
-				if (rename(module_filenames[i], disabled_name) == -1) {
-					ERR(sh, "Could not disable module file %s.",
-							module_filenames[i]);
-					retval = -2;
-				}
-				retval = 0;
-				goto cleanup;
 			}
+			retval=0;
+			goto cleanup;
 		}
 	}
 	ERR(sh, "Module %s was not found.", module_name);
@@ -1417,6 +1408,7 @@ static int semanage_direct_remove(semanage_handle_t * sh, char *module_name)
 		}
 		base++;
 		if (memcmp(module_name, base, name_len) == 0) {
+			semanage_enable_module(module_filenames[i]);
 			if (unlink(module_filenames[i]) == -1) {
 				ERR(sh, "Could not remove module file %s.",
 				    module_filenames[i]);
@@ -1538,13 +1530,13 @@ int semanage_direct_access_check(semanage_handle_t * sh)
 {
 	char polpath[PATH_MAX];
 
-	snprintf(polpath, PATH_MAX, "%s%s", selinux_path(),
+	snprintf(polpath, PATH_MAX, "%s%s", semanage_selinux_path(),
 		 sh->conf->store_path);
 
 	if (semanage_check_init(polpath))
 		return -1;
 
-	return semanage_store_access_check(sh);
+	return semanage_store_access_check();
 }
 
 int semanage_direct_mls_enabled(semanage_handle_t * sh)

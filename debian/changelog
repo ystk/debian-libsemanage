@@ -1,3 +1,95 @@
+libsemanage (2.1.6-6) unstable; urgency=low
+
+  * Team upload.
+  * Do not Conflicts with ruby transitional package, use versionized Breaks
+    instead (Closes: #667066)
+  * debian/gbp.conf: Change default git-buildpackage build-directory
+
+ -- Laurent Bigonville <bigon@debian.org>  Sun, 10 Jun 2012 08:47:37 +0200
+
+libsemanage (2.1.6-5) unstable; urgency=low
+
+  * Team upload.
+  * debian/rules: Do not make tests failures fatal
+
+ -- Laurent Bigonville <bigon@debian.org>  Thu, 29 Mar 2012 15:44:35 +0200
+
+libsemanage (2.1.6-4) unstable; urgency=low
+
+  * Team upload.
+  * debian/control: Re-add Conflicts/Provides for the libsemanage1-dev package
+  * debian/rules: Fix FTBFS, all architectures are not x86_64-linux
+
+ -- Laurent Bigonville <bigon@debian.org>  Wed, 28 Mar 2012 22:05:33 +0200
+
+libsemanage (2.1.6-3) unstable; urgency=low
+
+  * Team upload.
+  * Switch to dh sequence, dh_python2, new ruby policy and multiarch
+  * debian/control:
+    - Bump Standards-Version to 3.9.3 (no further changes)
+    - Drop useless Conflicts/Replaces/Provides
+    - Add missing dependencies on the -dev package
+    - Add Homepage field
+    - Fix short Description to please lintian
+    - Update Vcs-* fields
+    - Add strict version on dependency against libsemanage-common
+    - Make binary packages arch:linux-any
+    - Put under the Debian SELinux team maintenance
+  * Move semanage.conf manpage to libsemanage-common package
+  * Add debian/gbp.conf file
+  * debian/rules: Append CPPFLAGS hardening flags to CFLAGS as build system is
+    not using CPPFLAGS
+
+ -- Laurent Bigonville <bigon@debian.org>  Tue, 27 Mar 2012 17:33:12 +0200
+
+libsemanage (2.1.6-2) unstable; urgency=low
+
+  * Make the python shared objects build correctly.
+
+ -- Russell Coker <russell@coker.com.au>  Tue, 28 Feb 2012 16:12:45 +1100
+
+libsemanage (2.1.6-1) unstable; urgency=low
+
+  * New upstream version, add support for MCS/MLS levels for restorecon and
+    lots of little changes.
+  * Added new symbols semanage_get_preserve_tunables,
+    semanage_set_preserve_tunables, and semanage_set_root.
+  * Removed more generated files in the clean process.
+  * Made tests/Makefile multi-arch aware.
+  * Switch to dpkg-source 3.0 (quilt) format
+
+ -- Russell Coker <russell@coker.com.au>  Mon, 20 Feb 2012 18:27:21 +1100
+
+libsemanage (2.1.0-2) unstable; urgency=low
+
+  * s/policymanagement/policy management/ and removed needless space
+    Closes: #639809, #639810
+
+ -- Russell Coker <russell@coker.com.au>  Wed, 31 Aug 2011 16:02:17 +1000
+
+libsemanage (2.1.0-1) unstable; urgency=low
+
+  * New upstream version, just a version bump.
+  * Made it build-depend on the latest libselinux1-dev and libsepol1-dev.
+  * Made myself the maintainer.
+
+ -- Russell Coker <russell@coker.com.au>  Tue, 30 Aug 2011 15:08:50 +1000
+
+libsemanage (2.0.46-2) unstable; urgency=low
+
+  * Change level support in file contexts to support no MLS label
+    Closes: #589515
+
+ -- Russell Coker <russell@coker.com.au>  Mon, 29 Aug 2011 20:18:29 +1000
+
+libsemanage (2.0.46-1) unstable; urgency=low
+
+  * New upstream version.
+  * Add support for using the level in generated file contexts.
+
+ -- Russell Coker <russell@coker.com.au>  Wed, 05 Jan 2011 18:11:56 +1100
+
 libsemanage (2.0.45-1) unstable; urgency=low
 
   * New upstream release

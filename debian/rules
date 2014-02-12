@@ -1,67 +1,60 @@
-#! /usr/bin/make -f
-############################ -*- Mode: Makefile; coding: utf-8 -*- ###########################
-## rules --- 
-## Author           : Manoj Srivastava ( srivasta@glaurung.green-gryphon.com ) 
-## Created On       : Fri Nov 14 12:33:34 2003
-## Created On Node  : glaurung.green-gryphon.com
-## Last Modified By : Manoj Srivastava
-## Last Modified On : Tue Nov 18 17:46:22 2003
-## Last Machine Used: glaurung.green-gryphon.com
-## Update Count     : 70
-## Status           : Unknown, Use with caution!
-## HISTORY          : 
-## Description      : 
-## 
-## arch-tag: 9a5063f4-1e20-4fff-b22a-de94c1e3d954
-## 
-## This program is free software; you can redistribute it and/or modify
-## it under the terms of the GNU General Public License as published by
-## the Free Software Foundation; either version 2 of the License, or
-## (at your option) any later version.
-##
-## This program is distributed in the hope that it will be useful,
-## but WITHOUT ANY WARRANTY; without even the implied warranty of
-## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-## GNU General Public License for more details.
-##
-## You should have received a copy of the GNU General Public License
-## along with this program; if not, write to the Free Software
-## Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
-##
-###############################################################################
+#!/usr/bin/make -f
+#export DH_VERBOSE=1
 
-# Include dpkg-architecture generated variables
-include debian/common/archvars.mk
+DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
 
-ifneq ($(DEB_HOST_ARCH_OS),linux)
-$(error This is a linux only package. Aborting build.)
-endif
+ALL_PY_VERSION = $(shell pyversions -vr)
 
-# Set variables with information extracted from control and changelog files
-include debian/common/pkgvars.mk
+# The build system doesn't use CPPFLAGS, pass them to CFLAGS to enable the
+# missing (hardening) flags.
+export DEB_CFLAGS_MAINT_APPEND = $(shell dpkg-buildflags --get CPPFLAGS)
 
-# variables useful for perl packages
-include debian/common/perlvars.mk
+%:
+	dh $@ --with python2 --with ruby
 
-# Install commands
-include debian/common/install_cmds.mk
+override_dh_auto_build:
+	$(MAKE) all LIBBASE="lib/${DEB_HOST_MULTIARCH}"
 
-include debian/local-vars.mk
+	for version in $(ALL_PY_VERSION); do              \
+	  $(MAKE) pywrap PYTHON=python$$version  \
+	    PYINC=-I/usr/include/python$$version          \
+	    PYTHONLIBDIR=/usr/lib/libpython$${version}.so; \
+	done;
 
-include debian/common/copt.mk
+	$(MAKE) -C src rubywrap RUBY=ruby1.8 RUBYLIBVER=1.8
 
-include debian/common/automake.mk
+	$(MAKE) -C src rubywrap RUBY=ruby1.9.1 RUBYLIBVER=1.9.1 \
+	  RUBYINC="/usr/include/ruby-1.9.1/ -I/usr/include/ruby-1.9.1/\$${RUBYPLATFORM}/"
 
+override_dh_auto_install:
+	$(MAKE) install DESTDIR="${CURDIR}/debian/tmp" \
+	  LIBDIR="${CURDIR}/debian/tmp/usr/lib/${DEB_HOST_MULTIARCH}" \
+	  SHLIBDIR="${CURDIR}/debian/tmp/usr/lib/${DEB_HOST_MULTIARCH}"
 
+	for version in $(ALL_PY_VERSION); do              \
+	  $(MAKE) install-pywrap PYTHON=python$$version  \
+	    DESTDIR="${CURDIR}/debian/tmp" \
+	    PYLIBDIR="${CURDIR}/debian/tmp/usr/lib/python$$version";   \
+	done;
 
-all:
-	@echo nothing to be done
+	$(MAKE) -C src install-rubywrap RUBY=ruby1.8 RUBYLIBVER=1.8 DESTDIR="${CURDIR}/debian/tmp" \
+	    RUBYINSTALL="${CURDIR}/debian/tmp/usr/lib/ruby/vendor_ruby/\$${RUBYLIBVER}/\$${RUBYPLATFORM}";
 
-include debian/common/targets.mk
+	$(MAKE) -C src install-rubywrap RUBY=ruby1.9.1 RUBYLIBVER=1.9.1 DESTDIR="${CURDIR}/debian/tmp" \
+	    RUBYINSTALL="${CURDIR}/debian/tmp/usr/lib/ruby/vendor_ruby/\$${RUBYLIBVER}/\$${RUBYPLATFORM}";
 
-include debian/local.mk
+override_dh_auto_clean:
 
+	for version in $(ALL_PY_VERSION); do              \
+	  $(MAKE) clean PYTHON=python$$version;  \
+	done;
 
-#Local variables:
-#mode: makefile
-#End:
+override_dh_install:
+	dh_install --list-missing
+
+override_dh_fixperms:
+	dh_fixperms
+	chmod -x ${CURDIR}/debian/python-semanage/usr/share/pyshared/semanage.py
+
+override_dh_auto_test:
+	$(MAKE) test || true
