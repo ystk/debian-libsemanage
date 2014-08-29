@@ -1,21 +1,23 @@
 Source: libsemanage
-VCS-Git: git://anonscm.debian.org/git/selinux/libsemanage.git
+VCS-Git: git://anonscm.debian.org/selinux/libsemanage.git
 VCS-Browser: http://anonscm.debian.org/gitweb/?p=selinux/libsemanage.git;a=summary
 Priority: optional
 Section: libdevel
 Maintainer: Debian SELinux maintainers <selinux-devel@lists.alioth.debian.org>
 Uploaders: Manoj Srivastava <srivasta@debian.org>, Russell Coker <russell@coker.com.au>
-Standards-Version: 3.9.3
+Standards-Version: 3.9.5
 Build-Depends: bison,
                debhelper (>= 9),
                file,
                flex,
-               gem2deb (>= 0.2.13~),
+               gem2deb (>= 0.5.0~),
+               libaudit-dev,
                libbz2-dev,
                libcunit1-dev,
-               libselinux1-dev (>= 2.1.9),
-               libsepol1-dev (>= 2.1.4),
+               libselinux1-dev (>= 2.3),
+               libsepol1-dev (>= 2.3),
                libustr-dev,
+               pkg-config,
                python-all-dev (>= 2.6.6-3~),
                swig
 Homepage: http://userspace.selinuxproject.org/
@@ -73,9 +75,9 @@ Description: SELinux policy management library
 Package: libsemanage1-dev
 Architecture: linux-any
 Depends: libbz2-dev,
-         libselinux1-dev (>= 2.1.9),
+         libselinux1-dev (>= 2.3),
          libsemanage1 (= ${binary:Version}),
-         libsepol1-dev (>= 2.1.4),
+         libsepol1-dev (>= 2.3),
          libustr-dev,
          ${misc:Depends},
          ${shlibs:Depends}
@@ -99,9 +101,6 @@ Description: Header files and libraries for SELinux policy manipulation
 Package: ruby-semanage
 Architecture: linux-any
 Depends: ruby | ruby-interpreter, ${misc:Depends}, ${shlibs:Depends}
-Breaks: libsemanage-ruby1.8 (<< 2.1.6-3)
-Replaces: libsemanage-ruby1.8 (<< 2.1.6-3)
-Provides: libsemanage-ruby1.8
 Section: ruby
 XB-Ruby-Versions: ${ruby:Versions}
 Description: Ruby bindings to for SELinux policy management
@@ -135,12 +134,3 @@ Description: Python bindings for SELinux policy management
  of many kinds of mandatory access control policies, including those
  based on the concepts of Type Enforcement, Role-based Access
  Control, and Multi-level Security.
-
-Package: libsemanage-ruby1.8
-Section: oldlibs
-Priority: extra
-Architecture: all
-Depends: ruby-semanage, ${misc:Depends}
-Description: Transitional package for ruby-semanage
- This is a transitional package to ease upgrades to the ruby-semanage
- package. It can safely be removed.

@@ -1,6 +1,2 @@
-fallback-user-level
-makefile
-max-uid
 tests-makefile
-no-link-libpython.patch
-prefix-rubymodule.patch
+disable-expand-check.patch
